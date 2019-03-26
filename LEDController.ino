@@ -5,14 +5,19 @@
 #define BRIGHTNESS 128
 #define STEP_DELAY 5
 #define COLOR_DELAY 2000
+//Input button can only be 2
+#define INPUT_BUTTON 2
 
 CRGB leds[NUM_LEDS];
 CRGB currentColor = CRGB::Black;
 int currentColorIndex = -1;
 
+static volatile bool enable = true;
+static volatile bool wasEnabled = false;
+
 void setup() 
 { 
-	Serial.begin(9600);
+	pinMode(INPUT_BUTTON, INPUT_PULLUP);
 
 	FastLED.addLeds<WS2811, LED_PIN, GRB>(leds, NUM_LEDS)
 		.setCorrection(TypicalLEDStrip);
@@ -25,9 +30,43 @@ void setup()
 
 void loop()
 {
+	CRGB targetColor;
+	CRGB stepColor;
+
+	if (wasEnabled != enable)
+	{
+		wasEnabled = enable;
+		delay(100);
+		attachInterrupt(digitalPinToInterrupt(INPUT_BUTTON), HandleInput, LOW);
+		
+	}
+
+	if (!enable)
+	{
+
+		if (currentColor.raw[0] != 0 || currentColor.raw[1] != 0 || currentColor.raw[2] != 0)
+		{
+			targetColor = CRGB::Black;
+
+			for (int buc = 0; buc < 256; buc++)
+			{
+				stepColor = Interpolate(&currentColor, &targetColor, buc);
+				FillArray(&stepColor);
+				FastLED.show();
+				delay(STEP_DELAY);
+			}
+
+			currentColorIndex = -1;
+			currentColor = targetColor;
+		}
+
+		delay(1000);
+		return;
+	}
+
 	currentColorIndex++;
 
-	CRGB targetColor;
+	
 
 	if (currentColorIndex > 2)
 		currentColorIndex = 0;
@@ -45,10 +84,16 @@ void loop()
 		break;
 	}
 
-	CRGB stepColor = currentColor;
+	stepColor = currentColor;
 
 	for (int buc = 0; buc < 256; buc++)
 	{
+		if (!enable)
+		{
+			currentColor = stepColor;
+			return;
+		}
+
 		stepColor = Interpolate(&currentColor, &targetColor, buc);
 		FillArray(&stepColor);
 		FastLED.show();
@@ -57,7 +102,28 @@ void loop()
 
 	currentColor = targetColor;
 
-	delay(COLOR_DELAY);
+	for (int buc = 0; buc < 10; buc++)
+	{
+		if (!enable)
+			return;
+		delay(COLOR_DELAY / 10);
+	}
+
+}
+
+void HandleInput()
+{
+	noInterrupts();
+	detachInterrupt(digitalPinToInterrupt(INPUT_BUTTON));
+	enable = !enable;
+
+	while (!digitalRead(INPUT_BUTTON))
+		delay(50);
+
+	interrupts();
+
+	delay(100);
+	
 }
 
 CRGB Interpolate(CRGB* Start, CRGB* End, int Level)
